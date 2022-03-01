@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 DIST_PROJECT=shiro
 MVN_GROUP_SLASHED="org/apache/${DIST_PROJECT}"
@@ -22,16 +22,18 @@ REPO_BASE_URL="https://repository.apache.org/content/groups/public"
 
 # list of files to download
 ARTIFACTS=("${REPO_BASE_URL}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip" \
-           "${REPO_BASE_URL}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.md5" \
-           "${REPO_BASE_URL}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.sha1" \
            "${REPO_BASE_URL}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.asc" )
+for hash in "md5" "sha1" "sha512" "sha3512"; do
+  ARTIFACTS+=("${REPO_BASE_URL}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.${hash}")
+  ARTIFACTS+=("${REPO_BASE_URL}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.asc.${hash}")
+done
 
 CURL_CMD="curl -C - -O"
 
 # Download all of them
-for ii in "${ARTIFACTS[@]}"
+for artifact in "${ARTIFACTS[@]}"
 do
-    ${CURL_CMD} $ii
+    ${CURL_CMD} "${artifact}"
 done
 
 # validate sha1
