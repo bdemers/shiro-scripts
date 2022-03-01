@@ -9,6 +9,21 @@ SVN_CHECKOUT_DIR="./target/svn-dist/${DIST_PROJECT}"
 RELEASE_VERSION=${RELEASE_VERSION:-$1}
 RELEASE_VERSION=${RELEASE_VERSION:-"VERSION_MISSING"}
 
+# validate a hash
+validate() {
+  local file_to_validate=${1}
+  local hash_type="${2}"
+  local hash_expected
+  local hash_actual
+
+  hash_expected=$(cat "${file_to_validate}.${hash_type//-}")
+  hash_actual=$(openssl "${hash_type}" -r < "${file_to_validate}" | awk '{print $1}')
+
+  if [[ "${hash_expected}" != "${hash_actual}" ]]; then
+    echo "Downloaded file: '${file_to_validate}' does not match the expected SHA1 of '${hash_actual}'"
+  fi
+}
+
 mkdir -p "${SVN_CHECKOUT_DIR}"
 svn co https://dist.apache.org/repos/dist/release/shiro/ "${SVN_CHECKOUT_DIR}"
 
@@ -36,20 +51,10 @@ do
     ${CURL_CMD} "${artifact}"
 done
 
-# validate sha1
-function validate {
-
-  FILE_TO_VALIDATE=${1}
-  SHA1_SUM_EXPECTED=$(cat "${FILE_TO_VALIDATE}.sha1")
-  SHA1_SUM_ACTUAL=$(shasum -a1 "${FILE_TO_VALIDATE}"  | awk '{print $1}')
-
-  if [[ "$SHA1_SUM_EXPECTED" != "$SHA1_SUM_ACTUAL" ]]; then
-    echo "Downloaded file: '${FILE_TO_VALIDATE}' does not match the expected SHA1 of '${SHA1_SUM_ACTUAL}'"
-  fi
-}
-
 # only the main artifact has a .sha1
-validate $(basename ${ARTIFACTS[0]})
+for hash in "md5" "sha1" "sha512" "sha3-512"; do
+  validate "$(basename "${ARTIFACTS[0]}")" "${hash}"
+done
 
 # now add them to svn
 svn add .
