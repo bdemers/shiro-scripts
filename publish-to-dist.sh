@@ -1,13 +1,34 @@
 #!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+SCRIPT_DIR="$(
+  cd -- "$(dirname "$0")" >/dev/null 2>&1 || exit 1
+  pwd -P
+)"
 
 DIST_PROJECT=shiro
 MVN_GROUP_SLASHED="org/apache/${DIST_PROJECT}"
 MVN_ARTIFACT_ID="shiro-root"
-SVN_CHECKOUT_DIR="./target/svn-dist/${DIST_PROJECT}"
+SVN_CHECKOUT_DIR="${SCRIPT_DIR}/target/svn-dist/${DIST_PROJECT}"
 
 # env var, or first arg
-RELEASE_VERSION=${RELEASE_VERSION:-$1}
-RELEASE_VERSION=${RELEASE_VERSION:-"VERSION_MISSING"}
+RELEASE_VERSION=${RELEASE_VERSION:-${1:-}}
+
+ARTIFACTS=()
+
+# time stamp
+ts() {
+  date "+%Y-%m-%dT%H:%M:%S%z"
+}
+
+# general readiness checks
+init() {
+  if [ -z "${RELEASE_VERSION:-}" ]; then
+    echo "[$(ts)] [ERROR] Shiro version argument required"
+    exit 1
+  fi
+}
 
 # validate a hash
 validate() {
@@ -16,47 +37,84 @@ validate() {
   local hash_expected
   local hash_actual
 
-  hash_expected=$(cat "${file_to_validate}.${hash_type//-}")
-  hash_actual=$(openssl "${hash_type}" -r < "${file_to_validate}" | awk '{print $1}')
+  echo "[$(ts)] [INFO] validating [${file_to_validate}.${hash_type//-/}]"
+  hash_expected=$(cat "${file_to_validate}.${hash_type//-/}")
+  hash_actual=$(openssl "${hash_type}" -r <"${file_to_validate}" | awk '{print $1}')
 
   if [[ "${hash_expected}" != "${hash_actual}" ]]; then
     echo "Downloaded file: '${file_to_validate}' does not match the expected SHA1 of '${hash_actual}'"
   fi
 }
 
-mkdir -p "${SVN_CHECKOUT_DIR}"
-svn co https://dist.apache.org/repos/dist/release/shiro/ "${SVN_CHECKOUT_DIR}"
+# checkout the existing dist repository and create a new version directory
+svn_checkout() {
+  mkdir -p "${SVN_CHECKOUT_DIR}"
+  echo "[$(ts)] [INFO] checking out shiro releases via svn to [${SVN_CHECKOUT_DIR}]."
+  svn co https://dist.apache.org/repos/dist/release/shiro/ "${SVN_CHECKOUT_DIR}"
 
-# create the new release version
-mkdir -p "${SVN_CHECKOUT_DIR}/${RELEASE_VERSION}"
-svn add "${RELEASE_VERSION}"
-cd "${SVN_CHECKOUT_DIR}/${RELEASE_VERSION}"
+  if [ -e "${SVN_CHECKOUT_DIR}/${RELEASE_VERSION}" ]; then
+    echo "[$(ts)] [ERROR] Shiro version already exists: [${SVN_CHECKOUT_DIR}/${RELEASE_VERSION}]"
+    exit 2
+  fi
 
-# download the released bits
-REPO_BASE_URL="https://repository.apache.org/content/groups/public"
+  # create the new release version
+  mkdir -p "${SVN_CHECKOUT_DIR}/${RELEASE_VERSION}"
+  cd "${SVN_CHECKOUT_DIR}" || exit 1
+  svn add "${RELEASE_VERSION}"
+}
 
-# list of files to download
-ARTIFACTS=("${REPO_BASE_URL}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip" \
-           "${REPO_BASE_URL}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.asc" )
-for hash in "md5" "sha1" "sha512" "sha3512"; do
-  ARTIFACTS+=("${REPO_BASE_URL}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.${hash}")
-  ARTIFACTS+=("${REPO_BASE_URL}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.asc.${hash}")
-done
+download_to_svn() {
+  local repo_base_url
+  local curl_args
 
-CURL_CMD="curl -C - -O"
+  # download the released bits
+  repo_base_url="https://repository.apache.org/content/groups/public"
 
-# Download all of them
-for artifact in "${ARTIFACTS[@]}"
-do
-    ${CURL_CMD} "${artifact}"
-done
+  # list of files to download
+  ARTIFACTS=("${repo_base_url}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip"
+    "${repo_base_url}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.asc")
+  for hash in "md5" "sha1" "sha256" "sha512" "sha3512"; do
+    ARTIFACTS+=("${repo_base_url}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.${hash}")
+    ARTIFACTS+=("${repo_base_url}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.asc.${hash}")
+  done
 
-# only the main artifact has a .sha1
-for hash in "md5" "sha1" "sha512" "sha3-512"; do
-  validate "$(basename "${ARTIFACTS[0]}")" "${hash}"
-done
+  curl_args=(
+    "--silent"
+    "--show-error"
+    "--fail"
+    "--retry" "3"
+    "--retry-delay" "3"
+    "--remote-name"
+    "--remote-header-name"
+    "--connect-timeout" "10"
+    "--max-time" "60"
+  )
 
-# now add them to svn
-svn add .
-svn status
-echo "You must now 'svn commit' these files from $(dirname $PWD)"
+  # Download all of them
+  cd "${SVN_CHECKOUT_DIR}/${RELEASE_VERSION}" || exit 1
+  echo "[$(ts)] [INFO] downloading ${#ARTIFACTS[*]} artifacts."
+  for artifact in "${ARTIFACTS[@]}"; do
+    echo "[$(ts)] [INFO] downloading ${artifact}... "
+    curl "${curl_args[@]}" --url "${artifact}"
+  done
+}
+
+main() {
+  svn_checkout
+
+  download_to_svn
+
+  echo "[$(ts)] [INFO] checking hashes of [${ARTIFACTS[0]}]"
+  for hash in "md5" "sha1" "sha256" "sha512" "sha3-512"; do
+    validate "$(basename "${ARTIFACTS[0]}")" "${hash}"
+  done
+
+  # now add them to svn
+  svn add .
+  svn status
+  echo "[$(ts)] [INFO] You must now 'svn commit' these files from [$(dirname "${SCRIPT_DIR}")]"
+}
+
+init
+
+main
