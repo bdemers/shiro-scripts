@@ -71,12 +71,11 @@ download_to_svn() {
   repo_base_url="https://repository.apache.org/content/groups/public"
 
   # list of files to download
-  ARTIFACTS=("${repo_base_url}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip"
-    "${repo_base_url}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.asc")
-  for hash in "md5" "sha1" "sha256" "sha512" "sha3512"; do
-    ARTIFACTS+=("${repo_base_url}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.${hash}")
-    ARTIFACTS+=("${repo_base_url}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.asc.${hash}")
-  done
+  ARTIFACTS=(
+    "${repo_base_url}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip"
+    "${repo_base_url}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.sha512"
+    "${repo_base_url}/${MVN_GROUP_SLASHED}/${MVN_ARTIFACT_ID}/${RELEASE_VERSION}/${MVN_ARTIFACT_ID}-${RELEASE_VERSION}-source-release.zip.asc"
+  )
 
   curl_args=(
     "--silent"
@@ -105,9 +104,7 @@ main() {
   download_to_svn
 
   echo "[$(ts)] [INFO] checking hashes of [${ARTIFACTS[0]}]"
-  for hash in "md5" "sha1" "sha256" "sha512" "sha3-512"; do
-    validate "$(basename "${ARTIFACTS[0]}")" "${hash}"
-  done
+  validate "$(basename "${ARTIFACTS[0]}")" "sha512"
 
   # now add them to svn
   svn add .
